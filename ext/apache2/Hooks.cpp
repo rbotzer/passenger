@@ -491,9 +491,11 @@ private:
 			string uploadDataMemory;
 			shared_ptr<BufferedUpload> uploadDataFile;
 			const char *contentLength;
+			const char *contentEncoding;
 			
 			expectingUploadData = ap_should_client_block(r);
 			contentLength = lookupHeader(r, "Content-Length");
+			contentEncoding = lookupHeader(r, "Content-Encoding");
 			
 			/* If the HTTP upload data is larger than a threshold, or if the HTTP
 			 * client sent HTTP upload data using the "chunked" transfer encoding
@@ -506,9 +508,9 @@ private:
 			 */
 			if (expectingUploadData) {
 				if (contentLength == NULL || atol(contentLength) > LARGE_UPLOAD_THRESHOLD) {
-					uploadDataFile = receiveRequestBody(r, contentLength);
+					uploadDataFile = receiveRequestBody(r, contentLength, contentEncoding);
 				} else {
-					receiveRequestBody(r, contentLength, uploadDataMemory);
+					receiveRequestBody(r, contentLength, contentEncoding, uploadDataMemory);
 				}
 			}
 			
@@ -1092,11 +1094,14 @@ private:
 	 *                      to check whether the HTTP client has sent complete upload
 	 *                      data. NULL indicates that there is no Content-Length header,
 	 *                      i.e. that the HTTP client used chunked transfer encoding.
+	 * @param contentEncoding The value of the HTTP Content-Encoding header. This is used
+	 *                        to check whether the HTTP client has sent gzip-compressed
+	 *                        data. NULL indicates that there is no Content-Encoding header.
 	 * @throws RuntimeException
 	 * @throws SystemException
 	 * @throws IOException
 	 */
-	shared_ptr<BufferedUpload> receiveRequestBody(request_rec *r, const char *contentLength) {
+	shared_ptr<BufferedUpload> receiveRequestBody(request_rec *r, const char *contentLength, const char *contentEncoding) {
 		TRACE_POINT();
 		DirConfig *config = getDirConfig(r);
 		shared_ptr<BufferedUpload> tempFile;
@@ -1122,7 +1127,7 @@ private:
 			total_written += written;
 		}
 		
-		if (contentLength != NULL && ftell(tempFile->handle) != atol(contentLength)) {
+		if (contentLength != NULL && ftell(tempFile->handle) != atol(contentLength) && strcmp(contentEncoding, "gzip") != 0) {
 			string message = "It looks like the browser did not finish the file upload: "
 				"it said it will upload ";
 			message.append(contentLength);
@@ -1143,11 +1148,14 @@ private:
 	 *                      to check whether the HTTP client has sent complete upload
 	 *                      data. NULL indicates that there is no Content-Length header,
 	 *                      i.e. that the HTTP client used chunked transfer encoding.
+	 * @param contentEncoding The value of the HTTP Content-Encoding header. This is used
+	 *                        to check whether the HTTP client has sent gzip-compressed
+	 *                        data. NULL indicates that there is no Content-Encoding header.
 	 * @param string The string to buffer into.
 	 * @throws RuntimeException
 	 * @throws IOException
 	 */
-	void receiveRequestBody(request_rec *r, const char *contentLength, string &buffer) {
+	void receiveRequestBody(request_rec *r, const char *contentLength, const char *contentEncoding, string &buffer) {
 		TRACE_POINT();
 		unsigned long l_contentLength = 0;
 		char buf[1024 * 32];
@@ -1163,7 +1171,7 @@ private:
 			buffer.append(buf, len);
 		}
 		
-		if (contentLength != NULL && buffer.size() != l_contentLength) {
+		if (contentLength != NULL && buffer.size() != l_contentLength  && strcmp(contentEncoding, "gzip") != 0) {
 			string message = "It looks like the browser did not finish the file upload: "
 				"it said it will upload ";
 			message.append(contentLength);
